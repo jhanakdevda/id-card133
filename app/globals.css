@@ -1,0 +1,150 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-mono-victor), ui-monospace, monospace;
+  --font-mono: var(--font-mono-victor), ui-monospace, monospace;
+  --font-serif: var(--font-display-serif), ui-serif, Georgia, serif;
+  --color-hh-green: var(--hh-green);
+  --color-hh-green-deep: var(--hh-green-deep);
+  --color-hh-yellow: var(--hh-yellow);
+  --color-hh-cream: var(--hh-cream);
+  --color-hh-magenta: var(--hh-magenta);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Raw HH Goa brand palette */
+  --hh-green: #0b6839;
+  --hh-green-deep: #064026;
+  --hh-yellow: #fee101;
+  --hh-cream: #fffbe8;
+  --hh-magenta: #e6167a;
+
+  --background: #064026;
+  --foreground: #fffbe8;
+  --card: #0b6839;
+  --card-foreground: #fffbe8;
+  --popover: #0b6839;
+  --popover-foreground: #fffbe8;
+  --primary: #fee101;
+  --primary-foreground: #064026;
+  --secondary: #0d5731;
+  --secondary-foreground: #fffbe8;
+  --muted: #0d5731;
+  --muted-foreground: #cfe6d6;
+  --accent: #e6167a;
+  --accent-foreground: #fffbe8;
+  --destructive: #e6167a;
+  --border: rgba(255, 251, 232, 0.18);
+  --input: rgba(255, 251, 232, 0.16);
+  --ring: #fee101;
+  --chart-1: #fee101;
+  --chart-2: #0b6839;
+  --chart-3: #e6167a;
+  --chart-4: #cfe6d6;
+  --chart-5: #064026;
+  --radius: 0.5rem;
+  --sidebar: #0b6839;
+  --sidebar-foreground: #fffbe8;
+  --sidebar-primary: #fee101;
+  --sidebar-primary-foreground: #064026;
+  --sidebar-accent: #0d5731;
+  --sidebar-accent-foreground: #fffbe8;
+  --sidebar-border: rgba(255, 251, 232, 0.18);
+  --sidebar-ring: #fee101;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 50% 120%, rgba(254, 225, 1, 0.08), transparent 55%),
+      radial-gradient(circle at 0% 0%, rgba(11, 104, 57, 0.5), transparent 40%);
+  }
+}
+
+/* HH Goa display lockup: high-contrast condensed serif in yellow */
+.hh-wordmark {
+  font-family: var(--font-serif);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 0.9;
+}
+
+/* Floating animation for the गोवा logo */
+@keyframes goa-float {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  40% { transform: translateY(-10px) scale(1.04); }
+  60% { transform: translateY(-8px) scale(1.03); }
+}
+
+.goa-float {
+  animation: goa-float 3.6s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* Grid background like the reference */
+.hh-grid {
+  background-image:
+    linear-gradient(rgba(255,251,232,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,251,232,0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Hero title with dark outline stroke */
+.hh-hero-title {
+  -webkit-text-stroke: 3px #053a22;
+  paint-order: stroke fill;
+}
+
+/* ID card preview shadow */
+.hh-card-shadow {
+  box-shadow: 6px 6px 0px 0px #000, 0 20px 60px rgba(0,0,0,0.5);
+}
