@@ -277,7 +277,7 @@ export function BadgeGenerator() {
               active={format === 'A'}
               onClick={() => setFormat('A')}
               label="Quick"
-              sub="photo only"
+              sub="less noise · more signal"
             />
             <FormatButton
               active={format === 'B'}
@@ -476,7 +476,7 @@ function FormatButton({
       <span className="font-mono text-sm font-semibold">{label}</span>
       <span
         className={cn(
-          'font-mono text-xs',
+          'mt-1.5 font-mono text-xs',
           active ? 'text-primary-foreground/80' : 'text-muted-foreground',
         )}
       >

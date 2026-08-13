@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface PhotoDropzoneProps {
@@ -32,111 +32,30 @@ async function fileToImageUrl(file: File): Promise<string> {
   })
 }
 
-async function detectFaces(imageUrl: string): Promise<number> {
-  try {
-    // Dynamic import to load face-api.js
-    const faceapi = await import('@vladmandic/face-api')
-    
-    // Create an image element
-    const img = document.createElement('img')
-    img.src = imageUrl
-    img.crossOrigin = 'anonymous'
-    
-    await new Promise((resolve) => {
-      img.onload = resolve
-    })
-
-    // Load models (lazy load on first use)
-    const modelsUrl = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/'
-    if (!faceapi.nets.tinyFaceDetector.isLoaded) {
-      await faceapi.nets.tinyFaceDetector.load(modelsUrl)
-    }
-
-    // Detect faces with optimized options for speed
-    const options = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 320, // Reduced from default for faster detection
-      scoreThreshold: 0.5, // More lenient threshold for speed
-    })
-    const detections = await faceapi.detectAllFaces(img, options)
-    return detections.length
-  } catch (err) {
-    console.error('Face detection failed:', err)
-    return 0
-  }
-}
-
 export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  
+
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [validationStatus, setValidationStatus] = useState<'pending' | 'validating' | 'valid' | 'error'>('pending')
   const [cameraActive, setCameraActive] = useState(false)
-  const [facesDetected, setFacesDetected] = useState<number | null>(null)
-  const [isProcessing, setIsProcessing] = useState(false)
-
-  // Load face detection models on component mount
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const faceapi = await import('@vladmandic/face-api')
-        const modelsUrl = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/'
-        if (!faceapi.nets.tinyFaceDetector.isLoaded) {
-          await faceapi.nets.tinyFaceDetector.load(modelsUrl)
-        }
-      } catch (err) {
-        console.error('Failed to load face detection models:', err)
-      }
-    }
-    loadModels()
-  }, [])
-
-  const validateAndProcessPhoto = useCallback(
-    async (dataUrl: string) => {
-      setValidationStatus('validating')
-      setIsProcessing(true)
-      try {
-        const faceCount = await detectFaces(dataUrl)
-        setFacesDetected(faceCount)
-
-        if (faceCount === 1) {
-          setValidationStatus('valid')
-          setError(null)
-          onPhoto(dataUrl)
-        } else if (faceCount === 0) {
-          setValidationStatus('error')
-          setError('No face detected. Please upload or capture a clear photo showing your face.')
-        } else {
-          setValidationStatus('error')
-          setError('Multiple faces detected. Please upload or capture a photo with only one person.')
-        }
-      } catch (err) {
-        console.error('Photo validation failed:', err)
-        setValidationStatus('error')
-        setError('Could not validate the photo. Please try again.')
-      } finally {
-        setIsProcessing(false)
-      }
-    },
-    [onPhoto],
-  )
+  const [isCapturing, setIsCapturing] = useState(false)
 
   const handleFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return
       try {
+        setError(null)
         const url = await fileToImageUrl(file)
-        await validateAndProcessPhoto(url)
+        onPhoto(url)
       } catch (err) {
-        console.log('[v0] photo processing failed:', err)
-        setValidationStatus('error')
+        console.log('[photo-dropzone] photo processing failed:', err)
         setError('Could not read that image. Try a JPG or PNG.')
       }
     },
-    [validateAndProcessPhoto],
+    [onPhoto],
   )
 
   const startCamera = useCallback(async () => {
@@ -146,13 +65,17 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
         video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
       })
       streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        setCameraActive(true)
-      }
+      setCameraActive(true)
+      // Attach stream after state update so the video element is rendered
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(() => {})
+        }
+      }, 100)
     } catch (err) {
       console.error('Camera access failed:', err)
-      setError('Camera access denied. Please check your permissions or use photo upload instead.')
+      setError('Camera access denied. Please check your browser permissions or use photo upload instead.')
     }
   }, [])
 
@@ -161,28 +84,33 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
     setCameraActive(false)
-    setFacesDetected(null)
   }, [])
 
-  const capturePhoto = useCallback(async () => {
+  const capturePhoto = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return
-    
-    const ctx = canvasRef.current.getContext('2d')
-    if (!ctx) return
+    setIsCapturing(true)
 
-    // Set canvas size to video size
-    canvasRef.current.width = videoRef.current.videoWidth
-    canvasRef.current.height = videoRef.current.videoHeight
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      setIsCapturing(false)
+      return
+    }
 
-    // Draw video frame to canvas
-    ctx.drawImage(videoRef.current, 0, 0)
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.95)
+    canvas.width = video.videoWidth || 1280
+    canvas.height = video.videoHeight || 720
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    // Validate and process
-    await validateAndProcessPhoto(dataUrl)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+    onPhoto(dataUrl)
+    setIsCapturing(false)
     stopCamera()
-  }, [validateAndProcessPhoto, stopCamera])
+  }, [onPhoto, stopCamera])
 
   return (
     <div className="flex flex-col gap-4">
@@ -194,37 +122,23 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
             ref={videoRef}
             autoPlay
             playsInline
+            muted
             className="w-full aspect-video bg-black"
           />
-
-          {/* Face Detection Guide Overlay */}
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="relative w-48 h-64 border-2 border-yellow-400 rounded-lg animate-pulse opacity-60" />
-          </div>
-
-          {/* Face Detection Status */}
-          <div className="px-4 py-2 bg-secondary/80">
-            {facesDetected !== null && (
-              <p className={cn(
-                'font-mono text-sm text-center',
-                facesDetected === 1 ? 'text-green-500' : 'text-red-500'
-              )}>
-                {facesDetected === 0 && 'No face detected'}
-                {facesDetected === 1 && '✓ Face detected! Ready to capture.'}
-                {facesDetected > 1 && `Multiple faces detected (${facesDetected})`}
-              </p>
-            )}
-          </div>
 
           {/* Camera Controls */}
           <div className="flex gap-2 p-4">
             <button
               type="button"
               onClick={capturePhoto}
-              disabled={isProcessing}
-              className="flex-1 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-mono text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"
+              disabled={isCapturing}
+              className="flex-1 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-mono text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {isProcessing ? 'Validating...' : 'Capture Photo'}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              {isCapturing ? 'Capturing…' : 'Capture Photo'}
             </button>
             <button
               type="button"
@@ -285,11 +199,7 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
                 </span>
               )}
               <span className="font-mono text-sm text-foreground">
-                {isProcessing
-                  ? 'validating photo…'
-                  : previewUrl
-                    ? 'tap to swap photo'
-                    : 'drop a photo or tap to upload'}
+                {previewUrl ? 'tap to swap photo' : 'drop a photo or tap to upload'}
               </span>
               <span className="font-mono text-xs text-muted-foreground">
                 JPG · PNG · HEIC
@@ -328,8 +238,8 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
             Capture Photo
           </button>
 
-          {/* Validation Status Messages */}
-          {validationStatus === 'valid' && (
+          {/* Preview success indicator */}
+          {previewUrl && (
             <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2">
               <svg
                 width="16"
@@ -343,7 +253,7 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               <p className="font-mono text-xs text-green-600">
-                ✓ Photo validated! Ready to create your ID card.
+                ✓ Photo added! Ready to create your ID card.
               </p>
             </div>
           )}
