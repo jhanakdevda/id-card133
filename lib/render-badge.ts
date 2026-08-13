@@ -324,10 +324,19 @@ export function drawBadge(canvas: HTMLCanvasElement, data: BadgeData) {
       cy += chipH + 32
     }
 
-    // Barcode — bare bars, no background
-    cy += 16
-    ctx.fillStyle = CREAM
-    drawBarcode(ctx, (data.name || 'builder') + (data.role || ''), centerX, cy, 400, 60)
+    // Barcode at bottom — bare bars, no background
+    const barcodeY = BADGE_H - 70
+    const barcodeW = 400
+    const barcodeH = 60
+    
+    // Draw barcode rectangle border
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = 1.5
+    ctx.strokeRect(centerX - barcodeW / 2, barcodeY, barcodeW, barcodeH)
+    
+    // Draw barcode bars
+    ctx.fillStyle = '#000000'
+    drawBarcode(ctx, (data.name || 'builder') + (data.role || ''), centerX, barcodeY, barcodeW, barcodeH)
 
   } else {
     ctx.font      = `800 60px ${fontSerif}`

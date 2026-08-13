@@ -181,52 +181,83 @@ export function BadgeGenerator() {
   }, [getBlob, fileName])
 
   const caption = useCallback(() => {
-    if (format === 'B' && (name.trim() || title)) {
-      const who = name.trim() ? name.trim() : 'a builder'
-      return `Locked in as ${who} — "${title}" for Hacker House Goa 2026. Less noise, more signal. See you on the sand. #FrameInGoa`
+    if (format === 'B' && (name.trim() || role.trim())) {
+      const personName = name.trim() ? name.trim() : 'Builder'
+      const personRole = role.trim() ? role.trim() : 'Hacker'
+      return `**${personName} just entered Build Mode.** ⚡💻\n\nRole: **${personRole}**\nMission: **Build. Innovate. Impact.**\nLocation: **Goa, India.** 🌴\n\nSee you at **Hacker House Goa 2026**.\n#FrameInGoa @247pmstudio`
     }
-    return `Locked in for Hacker House Goa 2026. Less noise, more signal. See you on the sand. #FrameInGoa`
-  }, [format, name, title])
+    return `**Builder just entered Build Mode.** ⚡💻\n\nMission: **Build. Innovate. Impact.**\nLocation: **Goa, India.** 🌴\n\nSee you at **Hacker House Goa 2026**.\n#FrameInGoa @247pmstudio`
+  }, [format, name, role])
 
   const handleShare = useCallback(async () => {
     if (!validate()) return
     setShareNote(null)
-    const blob = await getBlob()
-    if (!blob) return
-    const text = caption()
-    const file = new File([blob], fileName(), { type: 'image/png' })
+    setProcessing(true)
+    try {
+      const blob = await getBlob()
+      if (!blob) return
+      const text = caption()
+      const file = new File([blob], fileName(), { type: 'image/png' })
 
-    // Best case (mobile): native share sheet attaches the image directly.
-    const nav = navigator as Navigator & {
-      canShare?: (data?: ShareData) => boolean
-    }
-    if (nav.canShare && nav.canShare({ files: [file] })) {
-      try {
-        await nav.share({ files: [file], text })
-        return
-      } catch (err) {
-        console.log('[v0] native share cancelled/failed:', err)
+      // Best case (mobile): native share sheet attaches the image directly.
+      const nav = navigator as Navigator & {
+        canShare?: (data?: ShareData) => boolean
       }
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        try {
+          await nav.share({ files: [file], text })
+          setProcessing(false)
+          return
+        } catch (err) {
+          console.log('[v0] native share cancelled/failed:', err)
+        }
+      }
+
+      // Desktop: Convert image to base64 and upload via API
+      const reader = new FileReader()
+      reader.onload = async (event) => {
+        const imageBase64 = event.target?.result as string
+        try {
+          const response = await fetch('/api/share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64, text }),
+          })
+
+          const data = await response.json()
+          
+          // Open Twitter with the share URL (includes image URL if upload succeeded)
+          if (data.twitterUrl) {
+            window.open(data.twitterUrl, '_blank', 'noopener,noreferrer')
+            setShareNote('Opening Twitter with your badge...')
+          } else {
+            // Fallback: open Twitter with text only
+            window.open(
+              `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
+              '_blank',
+              'noopener,noreferrer',
+            )
+            setShareNote('Opening Twitter (image upload may have failed, but caption is ready)')
+          }
+        } catch (err) {
+          console.error('[v0] share failed:', err)
+          // Fallback to text-only Twitter share
+          window.open(
+            `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
+            '_blank',
+            'noopener,noreferrer',
+          )
+          setShareNote('Opening Twitter with caption (image upload may have failed)')
+        } finally {
+          setProcessing(false)
+        }
+      }
+      reader.readAsDataURL(blob)
+    } catch (err) {
+      console.error('[v0] share error:', err)
+      setShareNote('Error preparing badge. Please try again.')
+      setProcessing(false)
     }
-
-    // Fallback (desktop): download the image + open a pre-filled tweet to attach.
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName()
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-
-    window.open(
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
-      '_blank',
-      'noopener,noreferrer',
-    )
-    setShareNote(
-      'Badge downloaded — attach it to the tweet that just opened, caption is ready.',
-    )
   }, [getBlob, caption, fileName])
 
   return (
