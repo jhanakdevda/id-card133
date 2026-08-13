@@ -65,6 +65,8 @@ export function BadgeGenerator() {
   const assetsRef = useRef<BadgeAssets | null>(null)
   const photoImgRef = useRef<HTMLImageElement | null>(null)
   const fontsRef = useRef({ serif: 'serif', mono: 'monospace' })
+  // Guard against double-download from rapid taps / double-clicks
+  const downloadingRef = useRef(false)
 
   const [format, setFormat] = useState<BadgeFormat>('B')
   const [name, setName] = useState('')
@@ -208,17 +210,24 @@ export function BadgeGenerator() {
 
   const handleDownload = useCallback(async () => {
     if (!validate()) return
+    // Prevent double-download from rapid taps
+    if (downloadingRef.current) return
+    downloadingRef.current = true
     const blob = await getBlob()
-    if (!blob) return
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName()
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }, [getBlob, fileName])
+    if (blob) {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName()
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    }
+    // Reset guard after 3s so user can download again later
+    setTimeout(() => { downloadingRef.current = false }, 3000)
+  }, [validate, getBlob, fileName])
 
   const caption = useCallback(() => {
     if (format === 'B' && (name.trim() || role.trim())) {
@@ -239,62 +248,36 @@ export function BadgeGenerator() {
 
     const text = caption()
 
-    // ── 1. Download full-quality PNG to device first
-    // On iOS: saves to Files app (user can Save Image to Photos from there)
-    // On Android: saves directly to Downloads / gallery
-    const pngBlob = await new Promise<Blob | null>(resolve =>
-      canvas.toBlob(b => resolve(b), 'image/png', 1.0)
-    )
-    if (pngBlob) {
-      const dlUrl = URL.createObjectURL(pngBlob)
-      const dl = Object.assign(document.createElement('a'), {
-        href: dlUrl,
-        download: fileName(),
-      })
-      dl.style.display = 'none'
-      document.body.appendChild(dl)
-      dl.click()
-      document.body.removeChild(dl)
-      setTimeout(() => URL.revokeObjectURL(dlUrl), 2000)
+    // ── 1. Download full-quality PNG to device (once per tap)
+    // Android → saves to Downloads / gallery
+    // iOS     → saves to Files; user can Save Image to Photos from there
+    if (!downloadingRef.current) {
+      downloadingRef.current = true
+      const pngBlob = await new Promise<Blob | null>(resolve =>
+        canvas.toBlob(b => resolve(b), 'image/png', 1.0)
+      )
+      if (pngBlob) {
+        const dlUrl = URL.createObjectURL(pngBlob)
+        const dl = Object.assign(document.createElement('a'), {
+          href: dlUrl,
+          download: fileName(),
+          style: 'display:none',
+        })
+        document.body.appendChild(dl)
+        dl.click()
+        document.body.removeChild(dl)
+        setTimeout(() => URL.revokeObjectURL(dlUrl), 2000)
+      }
+      setTimeout(() => { downloadingRef.current = false }, 3000)
     }
 
-    // ── 2. Compress to JPEG for background upload (15-20× smaller)
-    const MAX_PX = 1080
-    const scale = Math.min(1, MAX_PX / Math.max(canvas.width, canvas.height))
-    let imageBase64: string
-    if (scale < 1) {
-      const tmp = document.createElement('canvas')
-      tmp.width  = Math.round(canvas.width  * scale)
-      tmp.height = Math.round(canvas.height * scale)
-      tmp.getContext('2d')?.drawImage(canvas, 0, 0, tmp.width, tmp.height)
-      imageBase64 = tmp.toDataURL('image/jpeg', 0.78)
-    } else {
-      imageBase64 = canvas.toDataURL('image/jpeg', 0.78)
-    }
-
-    // ── 3. Open X after 600ms (give download a moment to initiate)
+    // ── 2. Open X with pre-filled tweet text after 600ms
+    // (gives download a moment to initiate before switching apps)
     setTimeout(() => {
       openOnX(text)
-      setShareNote('Badge saved to device ✓  Opening X…')
+      setShareNote('ID card saved ✓  Opening X to post…')
       setProcessing(false)
     }, 600)
-
-    // ── 4. Upload image in background; show URL when ready
-    ;(async () => {
-      try {
-        const res = await fetch('/api/share', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64, text }),
-        })
-        const data = await res.json()
-        if (data.imageUrl) {
-          setShareNote(`Badge saved ✓  Paste this link into your tweet for the image preview:\n${data.imageUrl}`)
-        }
-      } catch {
-        // Silent — X is already open
-      }
-    })()
   }, [canvasRef, caption, validate, fileName])
 
   return (
