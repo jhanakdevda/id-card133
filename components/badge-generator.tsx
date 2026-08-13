@@ -24,36 +24,40 @@ function getFontStack(varName: string, fallback: string) {
 }
 
 /**
- * Opens the X app (twitter://) if installed, otherwise navigates to twitter.com.
- * IMPORTANT: must be called synchronously within a user gesture handler —
- * delayed calls (setTimeout) cause window.open to be blocked on mobile.
+ * Opens X (Twitter) instantly.
+ * On desktop: opens twitter.com compose in a new tab immediately (0ms delay).
+ * On mobile: attempts native twitter:// deep link, with a fast 350ms fallback to twitter.com.
  */
 function openOnX(text: string) {
   const encoded = encodeURIComponent(text)
-  const appUrl  = `twitter://post?message=${encoded}`
   const webUrl  = `https://twitter.com/intent/tweet?text=${encoded}`
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 
+  // ── Desktop: open twitter.com in new tab immediately (0ms delay)
+  if (!isMobile) {
+    window.open(webUrl, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  // ── Mobile: attempt native app deep link with ultra-fast fallback
+  const appUrl = `twitter://post?message=${encoded}`
   let appOpened = false
   const onHide = () => { if (document.hidden) appOpened = true }
   document.addEventListener('visibilitychange', onHide)
 
-  // Invisible <a> click — most reliable way to fire a custom URL scheme
-  // across Safari, Chrome, and WebView on iOS/Android
   const a = Object.assign(document.createElement('a'), { href: appUrl })
   a.style.display = 'none'
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
 
-  // Fallback: if the X app didn't open after 1500ms, navigate to twitter.com.
-  // Use window.location.href — NEVER blocked by popup blockers (unlike window.open
-  // which requires a user gesture and fails in setTimeout on iOS/Android).
+  // Fallback after 350ms if the native X app did not open
   setTimeout(() => {
     document.removeEventListener('visibilitychange', onHide)
     if (!appOpened && !document.hidden) {
       window.location.href = webUrl
     }
-  }, 1500)
+  }, 350)
 }
 
 export function BadgeGenerator() {
