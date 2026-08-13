@@ -34,6 +34,7 @@ export function BadgeGenerator() {
   const [role, setRole] = useState('')
   const [title, setTitle] = useState('Ship-Fast Hacker')
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const [photoValidated, setPhotoValidated] = useState(false)
   const [photoZoom, setPhotoZoom] = useState(1)
   const [photoOffsetX, setPhotoOffsetX] = useState(0)
   const [photoOffsetY, setPhotoOffsetY] = useState(0)
@@ -121,8 +122,10 @@ export function BadgeGenerator() {
         const img = await loadImage(dataUrl)
         photoImgRef.current = img
         setPhotoUrl(dataUrl)
+        setPhotoValidated(true)
       } catch (err) {
         console.log('[v0] could not load photo image:', err)
+        setPhotoValidated(false)
       } finally {
         setProcessing(false)
       }
@@ -150,13 +153,13 @@ export function BadgeGenerator() {
     return `hacker-house-goa-2026-${slug}.png`
   }, [format, name])
 
-  const stateRef = useRef({ photoUrl, format, name, role, title })
-  useEffect(() => { stateRef.current = { photoUrl, format, name, role, title } }, [photoUrl, format, name, role, title])
+  const stateRef = useRef({ photoUrl, photoValidated, format, name, role, title })
+  useEffect(() => { stateRef.current = { photoUrl, photoValidated, format, name, role, title } }, [photoUrl, photoValidated, format, name, role, title])
 
   const validate = useCallback(() => {
-    const { photoUrl: pu, format: fmt, name: n, role: r, title: t } = stateRef.current
+    const { photoUrl: pu, photoValidated: pv, format: fmt, name: n, role: r, title: t } = stateRef.current
     const e: Record<string, string> = {}
-    if (!pu) e.photo = 'Photo is required'
+    if (!pu || !pv) e.photo = 'Valid photo with detected face is required'
     if (fmt === 'B') {
       if (!n.trim()) e.name = 'Name is required'
       if (!r.trim()) e.role = 'Role is required'
@@ -396,7 +399,7 @@ export function BadgeGenerator() {
         <div className="grid grid-cols-2 gap-3">
           <Button
             onClick={handleDownload}
-            disabled={!ready}
+            disabled={!ready || !photoValidated}
             className="h-12 gap-2 font-mono text-sm font-semibold"
           >
             <svg
@@ -418,7 +421,7 @@ export function BadgeGenerator() {
           </Button>
           <Button
             onClick={handleShare}
-            disabled={!ready}
+            disabled={!ready || !photoValidated}
             variant="secondary"
             className="h-12 gap-2 border border-border font-mono text-sm font-semibold"
           >
