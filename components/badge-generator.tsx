@@ -24,33 +24,40 @@ function getFontStack(varName: string, fallback: string) {
 }
 
 /**
- * Opens the X (Twitter) app if installed, otherwise falls back to twitter.com
- * in the browser. Works on iOS, Android, and desktop.
- *
- * @param text    The tweet text (plain, not encoded)
- * @param imageUrl Optional public image URL to attach as a link in the tweet
+ * Opens the X (Twitter) app if installed, otherwise falls back to twitter.com.
+ * Uses an invisible <a> click which is the most reliable method on iOS Chrome
+ * (WKWebView ignores window.location.href for custom URL schemes).
  */
 function openOnX(text: string, imageUrl?: string) {
-  // Append the image URL directly into the tweet text so both the
-  // native app and the web composer receive the image link.
   const fullText = imageUrl ? `${text}\n\n${imageUrl}` : text
 
   // twitter:// deep link — opens the X app on iOS/Android if installed
   const appUrl = `twitter://post?message=${encodeURIComponent(fullText)}`
-
   // Web fallback — opens twitter.com compose in the browser
   const webUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(fullText)}`
 
-  // Attempt to open the native X app
-  window.location.href = appUrl
+  let appOpened = false
 
-  // After 400 ms, if the page is still visible (app didn't open), open the
-  // web URL in a new tab so the user lands in the browser.
+  // visibilitychange fires immediately when the user leaves the page/app
+  // (e.g. iOS switches to the X app). Use it to cancel the web fallback.
+  const onVisibility = () => { if (document.hidden) appOpened = true }
+  document.addEventListener('visibilitychange', onVisibility)
+
+  // Clicking an <a> is more reliable than window.location.href on iOS Chrome
+  const a = Object.assign(document.createElement('a'), { href: appUrl })
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+
+  // Give iOS 1500ms to switch apps before falling back to the web URL.
+  // On Android 800ms is plenty; the extra time doesn’t hurt.
   setTimeout(() => {
-    if (!document.hidden) {
+    document.removeEventListener('visibilitychange', onVisibility)
+    if (!appOpened && !document.hidden) {
       window.open(webUrl, '_blank', 'noopener,noreferrer')
     }
-  }, 400)
+  }, 1500)
 }
 
 export function BadgeGenerator() {
@@ -232,9 +239,26 @@ export function BadgeGenerator() {
 
     const text = caption()
 
-    // ── 1. Compress to a small JPEG synchronously (skip blob/FileReader round-trip)
-    // Canvas is 1080×1350 PNG. Scale down to max 1080 on longest side, JPEG 0.78
-    // → reduces upload payload from ~3-4 MB to ~120-200 KB (~15-20× smaller)
+    // ── 1. Download full-quality PNG to device first
+    // On iOS: saves to Files app (user can Save Image to Photos from there)
+    // On Android: saves directly to Downloads / gallery
+    const pngBlob = await new Promise<Blob | null>(resolve =>
+      canvas.toBlob(b => resolve(b), 'image/png', 1.0)
+    )
+    if (pngBlob) {
+      const dlUrl = URL.createObjectURL(pngBlob)
+      const dl = Object.assign(document.createElement('a'), {
+        href: dlUrl,
+        download: fileName(),
+      })
+      dl.style.display = 'none'
+      document.body.appendChild(dl)
+      dl.click()
+      document.body.removeChild(dl)
+      setTimeout(() => URL.revokeObjectURL(dlUrl), 2000)
+    }
+
+    // ── 2. Compress to JPEG for background upload (15-20× smaller)
     const MAX_PX = 1080
     const scale = Math.min(1, MAX_PX / Math.max(canvas.width, canvas.height))
     let imageBase64: string
@@ -248,15 +272,14 @@ export function BadgeGenerator() {
       imageBase64 = canvas.toDataURL('image/jpeg', 0.78)
     }
 
-    // ── 2. Open X immediately — don't wait for the upload
-    // User lands on the compose screen right away. The image URL is a bonus
-    // that embeds as a card when the upload finishes fast enough.
-    openOnX(text)
-    setShareNote('Opening X… uploading badge in background.')
-    setProcessing(false)
+    // ── 3. Open X after 600ms (give download a moment to initiate)
+    setTimeout(() => {
+      openOnX(text)
+      setShareNote('Badge saved to device ✓  Opening X…')
+      setProcessing(false)
+    }, 600)
 
-    // ── 3. Upload in background — fire & forget
-    // If catbox responds quickly the next tweet still benefits (URL is logged)
+    // ── 4. Upload image in background; show URL when ready
     ;(async () => {
       try {
         const res = await fetch('/api/share', {
@@ -266,14 +289,13 @@ export function BadgeGenerator() {
         })
         const data = await res.json()
         if (data.imageUrl) {
-          // Image is now public — show the URL so user can paste it into their tweet
-          setShareNote(`Badge uploaded! Add this link to your tweet:\n${data.imageUrl}`)
+          setShareNote(`Badge saved ✓  Paste this link into your tweet for the image preview:\n${data.imageUrl}`)
         }
       } catch {
-        // Silent — X is already open, this is just a bonus
+        // Silent — X is already open
       }
     })()
-  }, [canvasRef, caption, validate])
+  }, [canvasRef, caption, validate, fileName])
 
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-6 md:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
