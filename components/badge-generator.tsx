@@ -24,38 +24,34 @@ function getFontStack(varName: string, fallback: string) {
 }
 
 /**
- * Opens the X (Twitter) app if installed, otherwise falls back to twitter.com.
- * Uses an invisible <a> click which is the most reliable method on iOS Chrome
- * (WKWebView ignores window.location.href for custom URL schemes).
+ * Opens the X app (twitter://) if installed, otherwise navigates to twitter.com.
+ * IMPORTANT: must be called synchronously within a user gesture handler —
+ * delayed calls (setTimeout) cause window.open to be blocked on mobile.
  */
-function openOnX(text: string, imageUrl?: string) {
-  const fullText = imageUrl ? `${text}\n\n${imageUrl}` : text
-
-  // twitter:// deep link — opens the X app on iOS/Android if installed
-  const appUrl = `twitter://post?message=${encodeURIComponent(fullText)}`
-  // Web fallback — opens twitter.com compose in the browser
-  const webUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(fullText)}`
+function openOnX(text: string) {
+  const encoded = encodeURIComponent(text)
+  const appUrl  = `twitter://post?message=${encoded}`
+  const webUrl  = `https://twitter.com/intent/tweet?text=${encoded}`
 
   let appOpened = false
+  const onHide = () => { if (document.hidden) appOpened = true }
+  document.addEventListener('visibilitychange', onHide)
 
-  // visibilitychange fires immediately when the user leaves the page/app
-  // (e.g. iOS switches to the X app). Use it to cancel the web fallback.
-  const onVisibility = () => { if (document.hidden) appOpened = true }
-  document.addEventListener('visibilitychange', onVisibility)
-
-  // Clicking an <a> is more reliable than window.location.href on iOS Chrome
+  // Invisible <a> click — most reliable way to fire a custom URL scheme
+  // across Safari, Chrome, and WebView on iOS/Android
   const a = Object.assign(document.createElement('a'), { href: appUrl })
   a.style.display = 'none'
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
 
-  // Give iOS 1500ms to switch apps before falling back to the web URL.
-  // On Android 800ms is plenty; the extra time doesn’t hurt.
+  // Fallback: if the X app didn't open after 1500ms, navigate to twitter.com.
+  // Use window.location.href — NEVER blocked by popup blockers (unlike window.open
+  // which requires a user gesture and fails in setTimeout on iOS/Android).
   setTimeout(() => {
-    document.removeEventListener('visibilitychange', onVisibility)
+    document.removeEventListener('visibilitychange', onHide)
     if (!appOpened && !document.hidden) {
-      window.open(webUrl, '_blank', 'noopener,noreferrer')
+      window.location.href = webUrl
     }
   }, 1500)
 }
@@ -238,7 +234,9 @@ export function BadgeGenerator() {
     return `**Builder just entered Build Mode.** ⚡💻\n\nMission: **Build. Innovate. Impact.**\nLocation: **Goa, India.** 🌴\n\nSee you at **Hacker House Goa 2026**.\n#FrameInGoa @247pmstudio`
   }, [format, name, role])
 
-  const handleShare = useCallback(async () => {
+  // Non-async: keeps the entire synchronous block in the user gesture context
+  // so openOnX() is never treated as a delayed/blocked popup call.
+  const handleShare = useCallback(() => {
     if (!validate()) return
     setShareNote(null)
     setProcessing(true)
@@ -248,36 +246,35 @@ export function BadgeGenerator() {
 
     const text = caption()
 
-    // ── 1. Download full-quality PNG to device (once per tap)
-    // Android → saves to Downloads / gallery
-    // iOS     → saves to Files; user can Save Image to Photos from there
+    // ── 1. Open X FIRST — synchronously, still inside the user gesture.
+    //    Any await before this call puts us outside the gesture context and
+    //    causes mobile browsers to block the navigation.
+    openOnX(text)
+    setShareNote('Opening X… your ID card is downloading.')
+    setProcessing(false)
+
+    // ── 2. Trigger download via callback (no await needed).
+    //    canvas.toBlob with a callback runs asynchronously but doesn't break
+    //    the gesture context for the openOnX call above.
     if (!downloadingRef.current) {
       downloadingRef.current = true
-      const pngBlob = await new Promise<Blob | null>(resolve =>
-        canvas.toBlob(b => resolve(b), 'image/png', 1.0)
-      )
-      if (pngBlob) {
-        const dlUrl = URL.createObjectURL(pngBlob)
-        const dl = Object.assign(document.createElement('a'), {
-          href: dlUrl,
-          download: fileName(),
-          style: 'display:none',
-        })
-        document.body.appendChild(dl)
-        dl.click()
-        document.body.removeChild(dl)
-        setTimeout(() => URL.revokeObjectURL(dlUrl), 2000)
-      }
-      setTimeout(() => { downloadingRef.current = false }, 3000)
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const dlUrl = URL.createObjectURL(blob)
+          const dl = Object.assign(document.createElement('a'), {
+            href: dlUrl,
+            download: fileName(),
+            style: 'display:none',
+          })
+          document.body.appendChild(dl)
+          dl.click()
+          document.body.removeChild(dl)
+          setTimeout(() => URL.revokeObjectURL(dlUrl), 2000)
+          setShareNote('X opened ✓  ID card saved ✓  Attach it to your post!')
+        }
+        setTimeout(() => { downloadingRef.current = false }, 3000)
+      }, 'image/png', 1.0)
     }
-
-    // ── 2. Open X with pre-filled tweet text after 600ms
-    // (gives download a moment to initiate before switching apps)
-    setTimeout(() => {
-      openOnX(text)
-      setShareNote('ID card saved ✓  Opening X to post…')
-      setProcessing(false)
-    }, 600)
   }, [canvasRef, caption, validate, fileName])
 
   return (

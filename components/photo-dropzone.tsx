@@ -10,24 +10,35 @@ interface PhotoDropzoneProps {
 }
 
 async function fileToImageUrl(file: File): Promise<string> {
+  // Detect HEIC/HEIF by MIME type OR file extension.
+  // On iOS, the browser may report an empty MIME type for HEIC files,
+  // so the extension check is essential.
   const isHeic =
-    /image\/hei(c|f)/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
+    /image\/hei(c|f)/i.test(file.type) ||
+    /\.(heic|heif)$/i.test(file.name) ||
+    (file.type === '' && /\.(heic|heif)$/i.test(file.name))
 
   let blob: Blob = file
+
   if (isHeic) {
-    const heic2any = (await import('heic2any')).default
-    const converted = await heic2any({
-      blob: file,
-      toType: 'image/jpeg',
-      quality: 0.92,
-    })
-    blob = Array.isArray(converted) ? converted[0] : converted
+    try {
+      const heic2any = (await import('heic2any')).default
+      const converted = await heic2any({
+        blob: file,
+        toType: 'image/jpeg',
+        quality: 0.92,
+      })
+      blob = Array.isArray(converted) ? converted[0] : converted
+    } catch (err) {
+      console.error('[photo-dropzone] HEIC conversion failed:', err)
+      throw new Error('Could not convert HEIC/HEIF image. Try exporting as JPG from your camera roll.')
+    }
   }
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
+    reader.onerror = () => reject(new Error('Could not read the image file.'))
     reader.readAsDataURL(blob)
   })
 }
@@ -202,14 +213,14 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
                 {previewUrl ? 'tap to swap photo' : 'drop a photo or tap to upload'}
               </span>
               <span className="font-mono text-xs text-muted-foreground">
-                JPG · PNG · HEIC
+                JPG · PNG · HEIC · HEIF · WebP
               </span>
             </button>
 
             <input
               ref={inputRef}
               type="file"
-              accept="image/*,.heic,.heif"
+              accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
               className="sr-only"
               onChange={(e) => void handleFile(e.target.files?.[0])}
             />
