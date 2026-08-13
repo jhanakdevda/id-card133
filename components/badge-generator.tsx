@@ -26,24 +26,31 @@ function getFontStack(varName: string, fallback: string) {
 /**
  * Opens the X (Twitter) app if installed, otherwise falls back to twitter.com
  * in the browser. Works on iOS, Android, and desktop.
+ *
+ * @param text    The tweet text (plain, not encoded)
+ * @param imageUrl Optional public image URL to attach as a link in the tweet
  */
-function openXUrl(twitterWebUrl: string) {
-  // Build the equivalent twitter:// deep link from the web URL
-  const appUrl = twitterWebUrl
-    .replace('https://twitter.com/intent/tweet', 'twitter://post')
-    .replace('https://x.com/intent/tweet', 'twitter://post')
-    .replace('text=', 'message=')
+function openOnX(text: string, imageUrl?: string) {
+  // Append the image URL directly into the tweet text so both the
+  // native app and the web composer receive the image link.
+  const fullText = imageUrl ? `${text}\n\n${imageUrl}` : text
 
-  // Attempt to open the native app
+  // twitter:// deep link — opens the X app on iOS/Android if installed
+  const appUrl = `twitter://post?message=${encodeURIComponent(fullText)}`
+
+  // Web fallback — opens twitter.com compose in the browser
+  const webUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(fullText)}`
+
+  // Attempt to open the native X app
   window.location.href = appUrl
 
-  // After 600 ms, if the page is still in focus (app didn't open), fall back
-  // to the web URL in a new tab so the user lands in the browser.
+  // After 400 ms, if the page is still visible (app didn't open), open the
+  // web URL in a new tab so the user lands in the browser.
   setTimeout(() => {
     if (!document.hidden) {
-      window.open(twitterWebUrl, '_blank', 'noopener,noreferrer')
+      window.open(webUrl, '_blank', 'noopener,noreferrer')
     }
-  }, 600)
+  }, 400)
 }
 
 export function BadgeGenerator() {
@@ -219,50 +226,54 @@ export function BadgeGenerator() {
     if (!validate()) return
     setShareNote(null)
     setProcessing(true)
-    try {
-      const blob = await getBlob()
-      if (!blob) return
-      const text = caption()
 
-      // Always go directly to X — deep link opens the app on mobile,
-      // falls back to twitter.com in browser if the app isn't installed.
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        const imageBase64 = event.target?.result as string
-        try {
-          const response = await fetch('/api/share', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageBase64, text }),
-          })
+    const canvas = canvasRef.current
+    if (!canvas) { setProcessing(false); return }
 
-          const data = await response.json()
-          
-          // Open X with the share URL (includes image URL if upload succeeded)
-          if (data.twitterUrl) {
-            openXUrl(data.twitterUrl)
-            setShareNote('Opening X with your badge…')
-          } else {
-            // Fallback: open X with text only
-            openXUrl(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`)
-            setShareNote('Opening X (caption is ready to post)')
-          }
-        } catch (err) {
-          console.error('[v0] share failed:', err)
-          // Fallback to text-only X share
-          openXUrl(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`)
-          setShareNote('Opening X with caption (image upload may have failed)')
-        } finally {
-          setProcessing(false)
-        }
-      }
-      reader.readAsDataURL(blob)
-    } catch (err) {
-      console.error('[v0] share error:', err)
-      setShareNote('Error preparing badge. Please try again.')
-      setProcessing(false)
+    const text = caption()
+
+    // ── 1. Compress to a small JPEG synchronously (skip blob/FileReader round-trip)
+    // Canvas is 1080×1350 PNG. Scale down to max 1080 on longest side, JPEG 0.78
+    // → reduces upload payload from ~3-4 MB to ~120-200 KB (~15-20× smaller)
+    const MAX_PX = 1080
+    const scale = Math.min(1, MAX_PX / Math.max(canvas.width, canvas.height))
+    let imageBase64: string
+    if (scale < 1) {
+      const tmp = document.createElement('canvas')
+      tmp.width  = Math.round(canvas.width  * scale)
+      tmp.height = Math.round(canvas.height * scale)
+      tmp.getContext('2d')?.drawImage(canvas, 0, 0, tmp.width, tmp.height)
+      imageBase64 = tmp.toDataURL('image/jpeg', 0.78)
+    } else {
+      imageBase64 = canvas.toDataURL('image/jpeg', 0.78)
     }
-  }, [getBlob, caption, fileName])
+
+    // ── 2. Open X immediately — don't wait for the upload
+    // User lands on the compose screen right away. The image URL is a bonus
+    // that embeds as a card when the upload finishes fast enough.
+    openOnX(text)
+    setShareNote('Opening X… uploading badge in background.')
+    setProcessing(false)
+
+    // ── 3. Upload in background — fire & forget
+    // If catbox responds quickly the next tweet still benefits (URL is logged)
+    ;(async () => {
+      try {
+        const res = await fetch('/api/share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64, text }),
+        })
+        const data = await res.json()
+        if (data.imageUrl) {
+          // Image is now public — show the URL so user can paste it into their tweet
+          setShareNote(`Badge uploaded! Add this link to your tweet:\n${data.imageUrl}`)
+        }
+      } catch {
+        // Silent — X is already open, this is just a bonus
+      }
+    })()
+  }, [canvasRef, caption, validate])
 
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-6 md:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
@@ -439,11 +450,27 @@ export function BadgeGenerator() {
           </Button>
         </div>
 
-        {shareNote && (
-          <p className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 font-mono text-xs text-foreground">
-            {shareNote}
-          </p>
-        )}
+        {shareNote && (() => {
+          // If the note contains a URL, split it out as a copyable link
+          const urlMatch = shareNote.match(/(https?:\/\/[^\s]+)/)
+          const url = urlMatch?.[1]
+          const label = shareNote.replace(/\n\n.*/, '').replace(/\n.*/, '')
+          return (
+            <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 font-mono text-xs text-foreground">
+              <p>{label}</p>
+              {url && (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 block break-all text-primary underline underline-offset-2"
+                >
+                  {url}
+                </a>
+              )}
+            </div>
+          )
+        })()}
         <p className="text-center font-mono text-xs text-muted-foreground">
           no login · no signup · downloads a real PNG
         </p>
