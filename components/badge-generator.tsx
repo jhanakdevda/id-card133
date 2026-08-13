@@ -24,23 +24,23 @@ function getFontStack(varName: string, fallback: string) {
 }
 
 /**
- * Opens X (Twitter) instantly.
- * On desktop: opens twitter.com compose in a new tab immediately (0ms delay).
- * On mobile: attempts native twitter:// deep link, with a fast 350ms fallback to twitter.com.
+ * Opens X (Twitter) with pre-filled text.
+ * Uses `twitter://tweet?text=` (with `text=` parameter) so native X app pre-fills text reliably on iOS and Android.
  */
 function openOnX(text: string) {
   const encoded = encodeURIComponent(text)
   const webUrl  = `https://twitter.com/intent/tweet?text=${encoded}`
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 
-  // ── Desktop: open twitter.com in new tab immediately (0ms delay)
+  // ── Desktop: open twitter.com compose in a new tab immediately
   if (!isMobile) {
     window.open(webUrl, '_blank', 'noopener,noreferrer')
     return
   }
 
-  // ── Mobile: attempt native app deep link with ultra-fast fallback
-  const appUrl = `twitter://post?message=${encoded}`
+  // ── Mobile: attempt native twitter://tweet?text= scheme
+  // `twitter://tweet?text=` uses `text=` (NOT legacy `message=`) so modern X app populates text
+  const appUrl = `twitter://tweet?text=${encoded}`
   let appOpened = false
   const onHide = () => { if (document.hidden) appOpened = true }
   document.addEventListener('visibilitychange', onHide)
@@ -51,13 +51,13 @@ function openOnX(text: string) {
   a.click()
   document.body.removeChild(a)
 
-  // Fallback after 350ms if the native X app did not open
+  // Fallback after 400ms to https://twitter.com/intent/tweet?text=
   setTimeout(() => {
     document.removeEventListener('visibilitychange', onHide)
     if (!appOpened && !document.hidden) {
       window.location.href = webUrl
     }
-  }, 350)
+  }, 400)
 }
 
 export function BadgeGenerator() {
@@ -233,9 +233,9 @@ export function BadgeGenerator() {
     if (format === 'B' && (name.trim() || role.trim())) {
       const personName = name.trim() ? name.trim() : 'Builder'
       const personRole = role.trim() ? role.trim() : 'Hacker'
-      return `**${personName} just entered Build Mode.** ⚡💻\n\nRole: **${personRole}**\nMission: **Build. Innovate. Impact.**\nLocation: **Goa, India.** 🌴\n\nSee you at **Hacker House Goa 2026**.\n#FrameInGoa @247pmstudio`
+      return `${personName} just entered Build Mode. ⚡💻\n\nRole: ${personRole}\nMission: Build. Innovate. Impact.\nLocation: Goa, India. 🌴\n\nSee you at Hacker House Goa 2026.\n#FrameInGoa @247pmstudio`
     }
-    return `**Builder just entered Build Mode.** ⚡💻\n\nMission: **Build. Innovate. Impact.**\nLocation: **Goa, India.** 🌴\n\nSee you at **Hacker House Goa 2026**.\n#FrameInGoa @247pmstudio`
+    return `Builder just entered Build Mode. ⚡💻\n\nMission: Build. Innovate. Impact.\nLocation: Goa, India. 🌴\n\nSee you at Hacker House Goa 2026.\n#FrameInGoa @247pmstudio`
   }, [format, name, role])
 
   // Non-async: keeps the entire synchronous block in the user gesture context
