@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface PhotoDropzoneProps {
@@ -9,37 +9,96 @@ interface PhotoDropzoneProps {
   busy: boolean
 }
 
+/** Max pixel dimension for the image passed to the badge renderer. */
+const MAX_PX = 1920
+
+/** Draw a bitmap/image to a canvas capped at MAX_PX, return JPEG data-URL. */
+function bitmapToDataUrl(source: ImageBitmap | HTMLImageElement): string {
+  const sw = source instanceof ImageBitmap ? source.width  : source.naturalWidth
+  const sh = source instanceof ImageBitmap ? source.height : source.naturalHeight
+  const scale = Math.min(1, MAX_PX / Math.max(sw, sh))
+  const c = document.createElement('canvas')
+  c.width  = Math.round(sw * scale)
+  c.height = Math.round(sh * scale)
+  c.getContext('2d')?.drawImage(source as CanvasImageSource, 0, 0, c.width, c.height)
+  return c.toDataURL('image/jpeg', 0.82)
+}
+
+/** Converts any image file (of any size, e.g. 1MB to 100MB+) into an optimized JPEG Data URL. */
 async function fileToImageUrl(file: File): Promise<string> {
-  // Detect HEIC/HEIF by MIME type OR file extension.
-  // On iOS, the browser may report an empty MIME type for HEIC files,
-  // so the extension check is essential.
   const isHeic =
     /image\/hei(c|f)/i.test(file.type) ||
     /\.(heic|heif)$/i.test(file.name) ||
     (file.type === '' && /\.(heic|heif)$/i.test(file.name))
 
-  let blob: Blob = file
-
   if (isHeic) {
+    // ── Tier 1 (HEIC): Native browser hardware decoder (iOS Safari 17+, macOS Safari)
+    try {
+      const bitmap = await createImageBitmap(file)
+      const dataUrl = bitmapToDataUrl(bitmap)
+      bitmap.close()
+      return dataUrl
+    } catch {
+      // Native HEIC decode not available — proceed to heic2any fallback
+    }
+
+    // ── Tier 2 (HEIC): heic2any JS converter
     try {
       const heic2any = (await import('heic2any')).default
-      const converted = await heic2any({
-        blob: file,
-        toType: 'image/jpeg',
-        quality: 0.92,
-      })
-      blob = Array.isArray(converted) ? converted[0] : converted
+      const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.75 })
+      const blob = Array.isArray(converted) ? converted[0] : converted
+      const bitmap = await createImageBitmap(blob)
+      const dataUrl = bitmapToDataUrl(bitmap)
+      bitmap.close()
+      return dataUrl
     } catch (err) {
       console.error('[photo-dropzone] HEIC conversion failed:', err)
-      throw new Error('Could not convert HEIC/HEIF image. Try exporting as JPG from your camera roll.')
+      throw new Error('Could not convert HEIC/HEIF image. Try exporting as JPG or PNG.')
     }
   }
 
+  // ── Tier 1 (All Formats): Hardware-accelerated createImageBitmap
+  try {
+    const bitmap = await createImageBitmap(file)
+    const dataUrl = bitmapToDataUrl(bitmap)
+    bitmap.close()
+    return dataUrl
+  } catch {
+    // createImageBitmap failed or unsupported — fallback to HTMLImageElement
+  }
+
+  // ── Tier 2 (All Formats): HTMLImageElement async decoder
+  try {
+    const objectUrl = URL.createObjectURL(file)
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const res = bitmapToDataUrl(img)
+          URL.revokeObjectURL(objectUrl)
+          resolve(res)
+        } catch (e) {
+          URL.revokeObjectURL(objectUrl)
+          reject(e)
+        }
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl)
+        reject(new Error('Image load failed'))
+      }
+      img.src = objectUrl
+    })
+    return dataUrl
+  } catch {
+    // HTMLImageElement failed — fallback to FileReader
+  }
+
+  // ── Tier 3 (Fallback): FileReader
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
     reader.onerror = () => reject(new Error('Could not read the image file.'))
-    reader.readAsDataURL(blob)
+    reader.readAsDataURL(file)
   })
 }
 
@@ -53,17 +112,26 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
   const [error, setError] = useState<string | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
+  const [isProcessingFile, setIsProcessingFile] = useState(false)
+
+  // Pre-warm heic2any so the module is cached before the user picks a file.
+  useEffect(() => {
+    import('heic2any').catch(() => { /* optional dep, ignore */ })
+  }, [])
 
   const handleFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return
       try {
         setError(null)
+        setIsProcessingFile(true)
         const url = await fileToImageUrl(file)
         onPhoto(url)
       } catch (err) {
         console.log('[photo-dropzone] photo processing failed:', err)
-        setError('Could not read that image. Try a JPG or PNG.')
+        setError('Could not read that image. Try another photo.')
+      } finally {
+        setIsProcessingFile(false)
       }
     },
     [onPhoto],
@@ -180,11 +248,16 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
               className={cn(
                 'group relative flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-secondary/40 px-6 py-8 text-center transition-colors',
                 dragging && 'border-primary bg-primary/10',
-                busy && 'pointer-events-none opacity-70',
+                (busy || isProcessingFile) && 'pointer-events-none opacity-70',
               )}
               aria-label="Upload a photo"
             >
-              {previewUrl ? (
+              {isProcessingFile ? (
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <span className="font-mono text-xs text-primary">Processing photo…</span>
+                </div>
+              ) : previewUrl ? (
                 <img
                   src={previewUrl || '/placeholder.svg'}
                   alt="Your uploaded photo preview"
@@ -210,10 +283,10 @@ export function PhotoDropzone({ onPhoto, previewUrl, busy }: PhotoDropzoneProps)
                 </span>
               )}
               <span className="font-mono text-sm text-foreground">
-                {previewUrl ? 'tap to swap photo' : 'drop a photo or tap to upload'}
+                {isProcessingFile ? 'Optimizing image size…' : previewUrl ? 'tap to swap photo' : 'drop a photo or tap to upload'}
               </span>
               <span className="font-mono text-xs text-muted-foreground">
-                JPG · PNG · HEIC · HEIF · WebP
+                Any size file · JPG · PNG · HEIC · HEIF · WebP
               </span>
             </button>
 
