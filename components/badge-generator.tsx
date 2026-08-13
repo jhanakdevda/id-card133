@@ -223,23 +223,9 @@ export function BadgeGenerator() {
       const blob = await getBlob()
       if (!blob) return
       const text = caption()
-      const file = new File([blob], fileName(), { type: 'image/png' })
 
-      // Best case (mobile): native share sheet attaches the image directly.
-      const nav = navigator as Navigator & {
-        canShare?: (data?: ShareData) => boolean
-      }
-      if (nav.canShare && nav.canShare({ files: [file] })) {
-        try {
-          await nav.share({ files: [file], text })
-          setProcessing(false)
-          return
-        } catch (err) {
-          console.log('[v0] native share cancelled/failed:', err)
-        }
-      }
-
-      // Desktop: Convert image to base64 and upload via API
+      // Always go directly to X — deep link opens the app on mobile,
+      // falls back to twitter.com in browser if the app isn't installed.
       const reader = new FileReader()
       reader.onload = async (event) => {
         const imageBase64 = event.target?.result as string
