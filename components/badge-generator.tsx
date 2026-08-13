@@ -24,11 +24,9 @@ function getFontStack(varName: string, fallback: string) {
 }
 
 /**
- * Opens X (Twitter) directly in the native mobile app if installed, or falls back to web.
- * - Android: uses `intent://` scheme targeting `com.twitter.android` to force opening native app with pre-filled text.
- * - iOS: uses `twitter://` scheme via anchor click to open native X app with pre-filled text.
- * - Desktop: opens twitter.com compose in new tab.
- * - Clipboard: copies caption text to clipboard as safety backup.
+ * Opens X (Twitter) directly in the native mobile app if installed, with text pre-filled.
+ * Uses `twitter://post?text=...&status=...` scheme across iOS & Android, falling back to web intent.
+ * Also copies caption text to clipboard as safety backup.
  */
 function openOnX(text: string) {
   const encoded = encodeURIComponent(text)
@@ -40,40 +38,33 @@ function openOnX(text: string) {
   }
 
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
-  const isAndroid = /Android/i.test(ua)
-  const isIOS = /iPhone|iPad|iPod/i.test(ua)
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(ua)
 
-  // ── 1. Android: use official Android Chrome Intent scheme
-  if (isAndroid) {
-    const androidIntentUrl = `intent://tweet?text=${encoded}#Intent;package=com.twitter.android;scheme=twitter;S.browser_fallback_url=${encodeURIComponent(webUrl)};end;`
-    window.location.href = androidIntentUrl
+  // ── Desktop: open in new tab immediately
+  if (!isMobile) {
+    window.open(webUrl, '_blank', 'noopener,noreferrer')
     return
   }
 
-  // ── 2. iOS: use twitter:// scheme with fast web fallback
-  if (isIOS) {
-    const appUrl = `twitter://post?text=${encoded}`
-    let appOpened = false
-    const onHide = () => { if (document.hidden) appOpened = true }
-    document.addEventListener('visibilitychange', onHide)
+  // ── Mobile (Android & iOS): attempt native twitter:// deep link with dual text/status params
+  const appUrl = `twitter://post?text=${encoded}&status=${encoded}`
+  let appOpened = false
+  const onHide = () => { if (document.hidden) appOpened = true }
+  document.addEventListener('visibilitychange', onHide)
 
-    const a = Object.assign(document.createElement('a'), { href: appUrl })
-    a.style.display = 'none'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+  const a = Object.assign(document.createElement('a'), { href: appUrl })
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 
-    setTimeout(() => {
-      document.removeEventListener('visibilitychange', onHide)
-      if (!appOpened && !document.hidden) {
-        window.location.href = webUrl
-      }
-    }, 450)
-    return
-  }
-
-  // ── 3. Desktop: open in new tab
-  window.open(webUrl, '_blank', 'noopener,noreferrer')
+  // Fallback after 450ms to web intent if X app is not installed
+  setTimeout(() => {
+    document.removeEventListener('visibilitychange', onHide)
+    if (!appOpened && !document.hidden) {
+      window.location.href = webUrl
+    }
+  }, 450)
 }
 
 export function BadgeGenerator() {
