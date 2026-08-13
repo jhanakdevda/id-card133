@@ -23,6 +23,29 @@ function getFontStack(varName: string, fallback: string) {
   return val ? `${val}, ${fallback}` : fallback
 }
 
+/**
+ * Opens the X (Twitter) app if installed, otherwise falls back to twitter.com
+ * in the browser. Works on iOS, Android, and desktop.
+ */
+function openXUrl(twitterWebUrl: string) {
+  // Build the equivalent twitter:// deep link from the web URL
+  const appUrl = twitterWebUrl
+    .replace('https://twitter.com/intent/tweet', 'twitter://post')
+    .replace('https://x.com/intent/tweet', 'twitter://post')
+    .replace('text=', 'message=')
+
+  // Attempt to open the native app
+  window.location.href = appUrl
+
+  // After 600 ms, if the page is still in focus (app didn't open), fall back
+  // to the web URL in a new tab so the user lands in the browser.
+  setTimeout(() => {
+    if (!document.hidden) {
+      window.open(twitterWebUrl, '_blank', 'noopener,noreferrer')
+    }
+  }, 600)
+}
+
 export function BadgeGenerator() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const assetsRef = useRef<BadgeAssets | null>(null)
@@ -229,28 +252,20 @@ export function BadgeGenerator() {
 
           const data = await response.json()
           
-          // Open Twitter with the share URL (includes image URL if upload succeeded)
+          // Open X with the share URL (includes image URL if upload succeeded)
           if (data.twitterUrl) {
-            window.open(data.twitterUrl, '_blank', 'noopener,noreferrer')
-            setShareNote('Opening Twitter with your badge...')
+            openXUrl(data.twitterUrl)
+            setShareNote('Opening X with your badge…')
           } else {
-            // Fallback: open Twitter with text only
-            window.open(
-              `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
-              '_blank',
-              'noopener,noreferrer',
-            )
-            setShareNote('Opening Twitter (image upload may have failed, but caption is ready)')
+            // Fallback: open X with text only
+            openXUrl(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`)
+            setShareNote('Opening X (caption is ready to post)')
           }
         } catch (err) {
           console.error('[v0] share failed:', err)
-          // Fallback to text-only Twitter share
-          window.open(
-            `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
-            '_blank',
-            'noopener,noreferrer',
-          )
-          setShareNote('Opening Twitter with caption (image upload may have failed)')
+          // Fallback to text-only X share
+          openXUrl(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`)
+          setShareNote('Opening X with caption (image upload may have failed)')
         } finally {
           setProcessing(false)
         }
